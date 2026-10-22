@@ -79,7 +79,8 @@ void WriteStderr(const std::wstring& text) {
               &written, nullptr);
 }
 
-bool RunCapture(const std::wstring& cmdline, std::string& out, DWORD& exit_code) {
+bool RunCapture(const std::wstring& cmdline, const std::wstring& environment, std::string& out,
+                DWORD& exit_code) {
     SECURITY_ATTRIBUTES attrs{sizeof(attrs), nullptr, TRUE};
     HANDLE read_pipe = nullptr;
     HANDLE write_pipe = nullptr;
@@ -95,8 +96,14 @@ bool RunCapture(const std::wstring& cmdline, std::string& out, DWORD& exit_code)
 
     PROCESS_INFORMATION process{};
     std::wstring mutable_cmdline = cmdline;
-    BOOL ok = CreateProcessW(nullptr, mutable_cmdline.data(), nullptr, nullptr, TRUE,
-                             CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+    DWORD flags = CREATE_NO_WINDOW;
+    void* block = nullptr;
+    if (!environment.empty()) {
+        block = const_cast<wchar_t*>(environment.data());
+        flags |= CREATE_UNICODE_ENVIRONMENT;
+    }
+    BOOL ok = CreateProcessW(nullptr, mutable_cmdline.data(), nullptr, nullptr, TRUE, flags, block,
+                             nullptr, &startup, &process);
     CloseHandle(write_pipe);
     if (!ok) {
         CloseHandle(read_pipe);
@@ -147,7 +154,7 @@ std::wstring FindVcvarsall() {
                            L"\" -latest -products * -find \"VC\\Auxiliary\\Build\\vcvarsall.bat\"";
     std::string out;
     DWORD exit_code = 0;
-    if (!RunCapture(cmdline, out, exit_code) || exit_code != 0) return {};
+    if (!RunCapture(cmdline, std::wstring{}, out, exit_code) || exit_code != 0) return {};
     std::wstring text = Trim(Widen(out));
     size_t newline = text.find_first_of(L"\r\n");
     if (newline != std::wstring::npos) text = Trim(text.substr(0, newline));
@@ -235,6 +242,48 @@ struct Cache {
     bool Empty() const { return arch.empty(); }
 };
 
+std::wstring SessionPath() {
+    wchar_t buffer[32768]{};
+    DWORD size = GetEnvironmentVariableW(L"PATH", buffer, static_cast<DWORD>(std::size(buffer)));
+    return std::wstring(buffer, size);
+}
+
+// Environment for the capture child: this process's environment with a previous
+// injection undone. Without that, a capture started from an activated shell would only
+// see what vcvarsall changes on top of itself, which is almost nothing.
+std::wstring PristineEnvironment(const Cache& previous) {
+    std::vector<std::wstring> names;
+    for (const auto& entry : previous.sets) names.push_back(entry.first);
+    names.push_back(L"VSCMD_VER");
+
+    std::vector<std::wstring> removed = previous.prepend;
+    removed.insert(removed.end(), previous.drop.begin(), previous.drop.end());
+
+    std::wstring text;
+    wchar_t* block = GetEnvironmentStringsW();
+    for (const wchar_t* p = block; p && *p; p += std::wcslen(p) + 1) {
+        std::wstring line(p);
+        size_t equals = line.find(L'=');
+        if (equals == 0) continue;  // drive-letter entries (=C:=...) are rebuilt by cmd
+        if (equals != std::wstring::npos && IsPathName(line.substr(0, equals))) continue;
+        if (std::any_of(names.begin(), names.end(), [&](const std::wstring& name) {
+                return _wcsicmp(name.c_str(), line.substr(0, equals).c_str()) == 0;
+            })) {
+            continue;
+        }
+        text += line + L'\0';
+    }
+    if (block) FreeEnvironmentStringsW(block);
+
+    std::wstring path;
+    for (const auto& dir : SplitPath(SessionPath())) {
+        if (ContainsPath(removed, dir)) continue;
+        if (!path.empty()) path += L';';
+        path += dir;
+    }
+    return text + L"PATH=" + path + L'\0' + L'\0';
+}
+
 std::wstring Field(const EnvMap& env, const wchar_t* name) {
     auto it = env.find(name);
     return it == env.end() ? std::wstring{} : it->second;
@@ -297,6 +346,17 @@ bool SaveCache(const fs::path& file, const Cache& cache) {
 }
 
 bool CaptureEnvironment(const std::wstring& arch, Cache& cache, std::wstring& error) {
+    Cache previous;
+    LoadCache(CacheFile(arch), previous);
+
+    // An activated shell can only be scrubbed back to a baseline when we know what the
+    // previous injection added.
+    if (GetEnvironmentVariableW(L"VSCMD_VER", nullptr, 0) > 0 && previous.Empty()) {
+        error = L"the MSVC environment is already active and no cache exists to rebuild "
+                L"the baseline from; run the first capture from a shell where it is not active";
+        return false;
+    }
+
     std::wstring vcvarsall = FindVcvarsall();
     if (vcvarsall.empty()) {
         error = L"vcvarsall.bat not found. Install the component "
@@ -326,9 +386,11 @@ bool CaptureEnvironment(const std::wstring& arch, Cache& cache, std::wstring& er
 
     std::string out;
     DWORD exit_code = 0;
-    // /d: skip AutoRun, so a cmd startup hook cannot pre-activate the environment
-    // and shrink the delta we are trying to measure.
-    bool ran = RunCapture(L"cmd.exe /d /c \"" + script.wstring() + L"\"", out, exit_code);
+    // /d skips AutoRun, and the scrubbed environment makes sure a startup hook or an
+    // already activated shell cannot shrink the delta we are trying to measure.
+    bool ran =
+        RunCapture(L"cmd.exe /d /c \"" + script.wstring() + L"\"", PristineEnvironment(previous),
+                   out, exit_code);
     std::error_code ec;
     fs::remove(script, ec);
     if (!ran) {
@@ -376,11 +438,8 @@ bool CaptureEnvironment(const std::wstring& arch, Cache& cache, std::wstring& er
         }
     }
 
-    Cache previous;
-    if (LoadCache(CacheFile(arch), previous)) {
-        for (const auto& dir : previous.prepend) {
-            if (!ContainsPath(fresh.prepend, dir)) fresh.drop.push_back(dir);
-        }
+    for (const auto& dir : previous.prepend) {
+        if (!ContainsPath(fresh.prepend, dir)) fresh.drop.push_back(dir);
     }
 
     cache = std::move(fresh);
@@ -410,12 +469,6 @@ std::wstring BatQuote(const std::wstring& value) {
         if (ch == L'%') out += L'%';
     }
     return out;
-}
-
-std::wstring SessionPath() {
-    wchar_t buffer[32768]{};
-    DWORD size = GetEnvironmentVariableW(L"PATH", buffer, static_cast<DWORD>(std::size(buffer)));
-    return std::wstring(buffer, size);
 }
 
 // PATH for the target session: prepended toolchain directories first, stale entries

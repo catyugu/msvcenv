@@ -10,9 +10,10 @@ once and re-injects it in tens of milliseconds.
 
 1. `vswhere.exe -latest -products *` locates `vcvarsall.bat`, so no toolchain path is
    hardcoded.
-2. A temporary batch file runs `vcvarsall.bat <arch>` inside a clean `cmd /d` (AutoRun
-   disabled, so a startup hook cannot pre-activate the environment) and dumps the
-   environment before and after.
+2. A temporary batch file runs `vcvarsall.bat <arch>` inside a clean `cmd /d` and dumps
+   the environment before and after. That child gets this process's environment with the
+   previous injection undone, so neither a startup hook nor an already activated shell can
+   hide part of the delta.
 3. The difference becomes the cache: changed variables, removed variables, and the PATH
    entries belonging to the toolset, the Windows SDK, MSBuild and friends.
 4. `print` renders that cache as PowerShell or batch code. PATH is resolved at that
@@ -62,8 +63,9 @@ One line in `$PROFILE`:
 . 'C:\tools\msvcenv\msvcenv.ps1'
 ```
 
-Both wrappers are silent no-ops when the environment is already active, when
-`msvcenv.exe` is missing, and when no MSVC installation can be found.
+Both wrappers are silent no-ops when the environment is already active or when
+`msvcenv.exe` is missing. A failed capture is reported on stderr instead of being
+swallowed.
 
 ## Commands
 
@@ -85,8 +87,15 @@ apply environment changes from a pipe and needs a file to `call`.
 ## After a Visual Studio update
 
 The cache stores the `vcvarsall.bat` timestamp and the toolset directory. If either
-changes, the next `print` recaptures by itself. `msvcenv refresh` forces it; `msvcenv
-status` shows whether the cache is stale. Deleting `cache\` is always safe.
+changes, the next `print` recaptures by itself; `msvcenv refresh` forces it, and `msvcenv
+status` shows whether the cache is stale.
+
+A capture is a difference, so it must not start from an already activated environment.
+`msvcenv` therefore removes the previous injection from the child's environment before
+running `vcvarsall.bat`, which lets `refresh` work from any shell, including one where this
+tool is already active. The one case that needs care is the very first capture: with no
+cache there is nothing to undo, so run it once from a shell without an active MSVC
+environment. Deleting `cache\` is always safe.
 
 ## Limits
 
