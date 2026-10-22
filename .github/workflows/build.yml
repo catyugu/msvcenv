@@ -1,0 +1,68 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: cmd
+        run: build.cmd
+
+      - name: Capture and render the environment
+        shell: pwsh
+        run: |
+          $ps1 = & .\msvcenv.exe print
+          if ($LASTEXITCODE -ne 0) { throw "msvcenv print failed" }
+          if (-not ($ps1 -match '^\$env:INCLUDE = ')) { throw "INCLUDE missing from the PowerShell output" }
+          if (-not ($ps1 -match '^\$env:PATH = ')) { throw "PATH missing from the PowerShell output" }
+
+          $bat = & .\msvcenv.exe print --shell bat
+          if ($LASTEXITCODE -ne 0) { throw "msvcenv print --shell bat failed" }
+          if (-not ($bat -match '^@set "INCLUDE=')) { throw "INCLUDE missing from the batch output" }
+
+          & .\msvcenv.exe status
+
+      - name: Inject with the cmd wrapper and compile
+        shell: cmd
+        run: |
+          call msvcenv.cmd
+          if not defined VSCMD_VER exit /b 1
+          where cl
+          if not exist scratch mkdir scratch
+          echo int main() { return 0; } > scratch\smoke.cpp
+          cl /nologo /EHsc scratch\smoke.cpp /Fo:scratch\ /Fe:scratch\smoke.exe
+          if errorlevel 1 exit /b 1
+          scratch\smoke.exe
+          if errorlevel 1 exit /b 1
+
+      - name: Inject with the PowerShell wrapper and compile
+        shell: pwsh
+        run: |
+          . .\msvcenv.ps1
+          if (-not $env:VSCMD_VER) { throw "the PowerShell wrapper did not activate the environment" }
+          New-Item -ItemType Directory -Force -Path scratch | Out-Null
+          'int main() { return 0; }' | Set-Content -LiteralPath scratch\smoke2.cpp
+          cl /nologo /EHsc scratch\smoke2.cpp /Fo:scratch\ /Fe:scratch\smoke2.exe
+          if ($LASTEXITCODE -ne 0) { throw "cl failed" }
+          & .\scratch\smoke2.exe
+          if ($LASTEXITCODE -ne 0) { throw "the compiled program failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msvcenv
+          path: |
+            msvcenv.exe
+            msvcenv.cmd
+            msvcenv.ps1
+          if-no-files-found: error

@@ -1,3 +1,5 @@
 msvcenv.exe
 build/
 cache/
+scratch/
+*.obj

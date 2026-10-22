@@ -1,5 +1,7 @@
 # msvcenv
 
+English | [简体中文](README.zh-CN.md)
+
 Fast MSVC developer environment for **cmd** and **PowerShell**, without paying the
 `vcvarsall.bat` / `Launch-VsDevShell.ps1` startup cost in every shell.
 
