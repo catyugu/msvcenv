@@ -40,21 +40,22 @@ to the sources. Object files go to `build\`. The compile flags are `/std:c++17 /
 
 ## Install
 
-Copy `msvcenv.exe`, `msvcenv.cmd` and `msvcenv.ps1` into one directory, for example
-`C:\tools\msvcenv`. The cache is created next to the exe as `cache\<arch>.env`.
+Copy `msvcenv.exe`, `msvcenv.cmd` and `msvcenv.ps1` into one directory of your choice;
+the examples below refer to it as `<install-dir>`. The cache is created next to the exe as
+`cache\<arch>.env`.
 
 ### cmd
 
 Point the per-user `AutoRun` value at the wrapper:
 
 ```bat
-reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_EXPAND_SZ /d "call \"C:\tools\msvcenv\msvcenv.cmd\"" /f
+reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_EXPAND_SZ /d "call \"<install-dir>\msvcenv.cmd\"" /f
 ```
 
 If something else already uses `AutoRun`, keep it and append instead of overwriting:
 
 ```bat
-if exist "C:\path\to\hook.bat" "C:\path\to\hook.bat" & call "C:\tools\msvcenv\msvcenv.cmd"
+if exist "<your-hook>.bat" "<your-hook>.bat" & call "<install-dir>\msvcenv.cmd"
 ```
 
 ### PowerShell
@@ -62,7 +63,7 @@ if exist "C:\path\to\hook.bat" "C:\path\to\hook.bat" & call "C:\tools\msvcenv\ms
 One line in `$PROFILE`:
 
 ```powershell
-. 'C:\tools\msvcenv\msvcenv.ps1'
+. '<install-dir>\msvcenv.ps1'
 ```
 
 Both wrappers are silent no-ops when the environment is already active or when
@@ -80,7 +81,7 @@ msvcenv status                                   show discovery and cache state
 `print` defaults to PowerShell output, so it can be used directly:
 
 ```powershell
-Invoke-Expression ((& 'C:\tools\msvcenv\msvcenv.exe' print) -join [Environment]::NewLine)
+Invoke-Expression ((& '<install-dir>\msvcenv.exe' print) -join [Environment]::NewLine)
 ```
 
 `--shell bat` writes a batch script; that is what `msvcenv.cmd` does, because cmd cannot

@@ -35,21 +35,21 @@ CRT 可再发行包），把 `msvcenv.exe` 生成在源码旁边，目标文件�
 
 ## 安装
 
-把 `msvcenv.exe`、`msvcenv.cmd`、`msvcenv.ps1` 复制到同一个目录，例如
-`C:\tools\msvcenv`。缓存会自动创建为 exe 旁边的 `cache\<arch>.env`。
+把 `msvcenv.exe`、`msvcenv.cmd`、`msvcenv.ps1` 复制到任意一个目录，下文用
+`<install-dir>` 指代它。缓存会自动创建为 exe 旁边的 `cache\<arch>.env`。
 
 ### cmd
 
 把当前用户的 `AutoRun` 指向包装脚本：
 
 ```bat
-reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_EXPAND_SZ /d "call \"C:\tools\msvcenv\msvcenv.cmd\"" /f
+reg add "HKCU\Software\Microsoft\Command Processor" /v AutoRun /t REG_EXPAND_SZ /d "call \"<install-dir>\msvcenv.cmd\"" /f
 ```
 
 如果 `AutoRun` 已被别的工具占用，保留它并追加，而不是覆盖：
 
 ```bat
-if exist "C:\path\to\hook.bat" "C:\path\to\hook.bat" & call "C:\tools\msvcenv\msvcenv.cmd"
+if exist "<your-hook>.bat" "<your-hook>.bat" & call "<install-dir>\msvcenv.cmd"
 ```
 
 ### PowerShell
@@ -57,7 +57,7 @@ if exist "C:\path\to\hook.bat" "C:\path\to\hook.bat" & call "C:\tools\msvcenv\ms
 `$PROFILE` 里加一行：
 
 ```powershell
-. 'C:\tools\msvcenv\msvcenv.ps1'
+. '<install-dir>\msvcenv.ps1'
 ```
 
 当环境已经激活、或者 `msvcenv.exe` 不存在时，两个包装脚本都是静默无操作。捕获失败会写到
@@ -74,7 +74,7 @@ msvcenv status                                   显示发现结果与缓存状�
 `print` 默认输出 PowerShell，可以直接用：
 
 ```powershell
-Invoke-Expression ((& 'C:\tools\msvcenv\msvcenv.exe' print) -join [Environment]::NewLine)
+Invoke-Expression ((& '<install-dir>\msvcenv.exe' print) -join [Environment]::NewLine)
 ```
 
 `--shell bat` 输出批处理；`msvcenv.cmd` 走的就是这条路，因为 cmd 无法从管道应用环境变量，
