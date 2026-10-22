@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build
         shell: cmd
@@ -58,7 +58,7 @@ jobs:
           & .\scratch\smoke2.exe
           if ($LASTEXITCODE -ne 0) { throw "the compiled program failed" }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: msvcenv
           path: |
